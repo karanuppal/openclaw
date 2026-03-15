@@ -1,7 +1,13 @@
 import { createJiti } from "jiti";
 import type { OpenClawConfig } from "../config/config.js";
-import type { PluginInstallRecord } from "../config/types.plugins.js";
 import { activateExtensionHostRegistry } from "../extension-host/activation.js";
+import {
+  buildExtensionHostRegistryCacheKey,
+  clearExtensionHostRegistryCache,
+  getCachedExtensionHostRegistry,
+  MAX_EXTENSION_HOST_REGISTRY_CACHE_ENTRIES,
+  setCachedExtensionHostRegistry,
+} from "../extension-host/loader-cache.js";
 import {
   listPluginSdkAliasCandidates,
   listPluginSdkExportedSubpaths,
@@ -20,17 +26,11 @@ import {
 } from "../extension-host/loader-policy.js";
 import type { GatewayRequestHandler } from "../gateway/server-methods/types.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
-import { resolveUserPath } from "../utils.js";
 import { clearPluginCommands } from "./commands.js";
-import {
-  applyTestPluginDefaults,
-  normalizePluginsConfig,
-  type NormalizedPluginsConfig,
-} from "./config-state.js";
+import { applyTestPluginDefaults, normalizePluginsConfig } from "./config-state.js";
 import { discoverOpenClawPlugins } from "./discovery.js";
 import { loadPluginManifestRegistry } from "./manifest-registry.js";
 import { createPluginRegistry, type PluginRecord, type PluginRegistry } from "./registry.js";
-import { resolvePluginCacheInputs } from "./roots.js";
 import { createPluginRuntime, type CreatePluginRuntimeOptions } from "./runtime/index.js";
 import type { PluginRuntime } from "./runtime/types.js";
 import type { OpenClawPluginModule, PluginLogger } from "./types.js";
@@ -50,12 +50,10 @@ export type PluginLoadOptions = {
   mode?: "full" | "validate";
 };
 
-const MAX_PLUGIN_REGISTRY_CACHE_ENTRIES = 32;
-const registryCache = new Map<string, PluginRegistry>();
 const openAllowlistWarningCache = new Set<string>();
 
 export function clearPluginLoaderCache(): void {
-  registryCache.clear();
+  clearExtensionHostRegistryCache();
   openAllowlistWarningCache.clear();
 }
 
@@ -66,67 +64,8 @@ export const __testing = {
   listPluginSdkExportedSubpaths,
   resolvePluginSdkAliasCandidateOrder,
   resolvePluginSdkAliasFile,
-  maxPluginRegistryCacheEntries: MAX_PLUGIN_REGISTRY_CACHE_ENTRIES,
+  maxPluginRegistryCacheEntries: MAX_EXTENSION_HOST_REGISTRY_CACHE_ENTRIES,
 };
-
-function getCachedPluginRegistry(cacheKey: string): PluginRegistry | undefined {
-  const cached = registryCache.get(cacheKey);
-  if (!cached) {
-    return undefined;
-  }
-  // Refresh insertion order so frequently reused registries survive eviction.
-  registryCache.delete(cacheKey);
-  registryCache.set(cacheKey, cached);
-  return cached;
-}
-
-function setCachedPluginRegistry(cacheKey: string, registry: PluginRegistry): void {
-  if (registryCache.has(cacheKey)) {
-    registryCache.delete(cacheKey);
-  }
-  registryCache.set(cacheKey, registry);
-  while (registryCache.size > MAX_PLUGIN_REGISTRY_CACHE_ENTRIES) {
-    const oldestKey = registryCache.keys().next().value;
-    if (!oldestKey) {
-      break;
-    }
-    registryCache.delete(oldestKey);
-  }
-}
-
-function buildCacheKey(params: {
-  workspaceDir?: string;
-  plugins: NormalizedPluginsConfig;
-  installs?: Record<string, PluginInstallRecord>;
-  env: NodeJS.ProcessEnv;
-}): string {
-  const { roots, loadPaths } = resolvePluginCacheInputs({
-    workspaceDir: params.workspaceDir,
-    loadPaths: params.plugins.loadPaths,
-    env: params.env,
-  });
-  const installs = Object.fromEntries(
-    Object.entries(params.installs ?? {}).map(([pluginId, install]) => [
-      pluginId,
-      {
-        ...install,
-        installPath:
-          typeof install.installPath === "string"
-            ? resolveUserPath(install.installPath, params.env)
-            : install.installPath,
-        sourcePath:
-          typeof install.sourcePath === "string"
-            ? resolveUserPath(install.sourcePath, params.env)
-            : install.sourcePath,
-      },
-    ]),
-  );
-  return `${roots.workspace ?? ""}::${roots.global ?? ""}::${roots.stock ?? ""}::${JSON.stringify({
-    ...params.plugins,
-    installs,
-    loadPaths,
-  })}`;
-}
 
 export function loadOpenClawPlugins(options: PluginLoadOptions = {}): PluginRegistry {
   const env = options.env ?? process.env;
@@ -136,7 +75,7 @@ export function loadOpenClawPlugins(options: PluginLoadOptions = {}): PluginRegi
   const logger = options.logger ?? defaultLogger();
   const validateOnly = options.mode === "validate";
   const normalized = normalizePluginsConfig(cfg.plugins);
-  const cacheKey = buildCacheKey({
+  const cacheKey = buildExtensionHostRegistryCacheKey({
     workspaceDir: options.workspaceDir,
     plugins: normalized,
     installs: cfg.plugins?.installs,
@@ -144,7 +83,7 @@ export function loadOpenClawPlugins(options: PluginLoadOptions = {}): PluginRegi
   });
   const cacheEnabled = options.cache !== false;
   if (cacheEnabled) {
-    const cached = getCachedPluginRegistry(cacheKey);
+    const cached = getCachedExtensionHostRegistry(cacheKey);
     if (cached) {
       activateExtensionHostRegistry(cached, cacheKey);
       return cached;
@@ -298,7 +237,7 @@ export function loadOpenClawPlugins(options: PluginLoadOptions = {}): PluginRegi
     env,
     cacheEnabled,
     cacheKey,
-    setCachedRegistry: setCachedPluginRegistry,
+    setCachedRegistry: setCachedExtensionHostRegistry,
     activateRegistry: activateExtensionHostRegistry,
   });
 }
