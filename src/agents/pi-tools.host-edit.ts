@@ -19,6 +19,11 @@ function resolveHostEditPath(root: string, pathParam: string): string {
  * if the target file on disk contains the intended newText, returns success so we don't surface
  * a false "edit failed" to the user (fixes #32333, same pattern as #30773 for write).
  */
+
+function normalizeToLF(text: string): string {
+  return text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+}
+
 export function wrapHostEditToolWithPostWriteRecovery(
   base: AnyAgentTool,
   root: string,
@@ -58,9 +63,14 @@ export function wrapHostEditToolWithPostWriteRecovery(
           // Only recover when the replacement likely occurred: newText is present and oldText
           // is no longer present. This avoids false success when upstream threw before writing
           // (e.g. oldText not found) but the file already contained newText (review feedback).
-          const hasNew = content.includes(newText);
+          const normalizedContent = normalizeToLF(content);
+          const normalizedNewText = normalizeToLF(newText);
+          const normalizedOldText = oldText !== undefined ? normalizeToLF(oldText) : undefined;
+          const hasNew = normalizedContent.includes(normalizedNewText);
           const stillHasOld =
-            oldText !== undefined && oldText.length > 0 && content.includes(oldText);
+            normalizedOldText !== undefined &&
+            normalizedOldText.length > 0 &&
+            normalizedContent.includes(normalizedOldText);
           if (hasNew && !stillHasOld) {
             return {
               content: [
