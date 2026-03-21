@@ -59,11 +59,50 @@ describe("config discord", () => {
     );
   });
 
-  it("rejects numeric discord allowlist entries", () => {
+  it("preserves large discord IDs as strings during validation", () => {
+    const largeId = "1234567890123456789";
     const res = validateConfigObject({
       channels: {
         discord: {
-          allowFrom: [123],
+          allowFrom: [largeId],
+          dm: { allowFrom: [largeId], groupChannels: [largeId] },
+          guilds: {
+            guild: {
+              users: [largeId],
+              roles: [largeId],
+              channels: {
+                general: { users: [largeId], roles: [largeId] },
+              },
+            },
+          },
+          execApprovals: { approvers: [largeId] },
+        },
+      },
+    });
+
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.config.channels?.discord?.allowFrom?.[0]).toBe(largeId);
+      expect(typeof res.config.channels?.discord?.allowFrom?.[0]).toBe("string");
+      expect(res.config.channels?.discord?.dm?.allowFrom?.[0]).toBe(largeId);
+      expect(res.config.channels?.discord?.dm?.groupChannels?.[0]).toBe(largeId);
+      expect(res.config.channels?.discord?.guilds?.guild?.users?.[0]).toBe(largeId);
+      expect(res.config.channels?.discord?.guilds?.guild?.roles?.[0]).toBe(largeId);
+      expect(res.config.channels?.discord?.guilds?.guild?.channels?.general?.users?.[0]).toBe(
+        largeId,
+      );
+      expect(res.config.channels?.discord?.guilds?.guild?.channels?.general?.roles?.[0]).toBe(
+        largeId,
+      );
+      expect(res.config.channels?.discord?.execApprovals?.approvers?.[0]).toBe(largeId);
+    }
+  });
+
+  it("coerces numeric discord IDs to strings", () => {
+    const res = validateConfigObject({
+      channels: {
+        discord: {
+          allowFrom: [12345],
           dm: { allowFrom: [456], groupChannels: [789] },
           guilds: {
             "123": {
@@ -79,11 +118,15 @@ describe("config discord", () => {
       },
     });
 
-    expect(res.ok).toBe(false);
-    if (!res.ok) {
-      expect(
-        res.issues.some((issue) => issue.message.includes("Discord IDs must be strings")),
-      ).toBe(true);
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      // Small numeric IDs should be coerced to strings
+      expect(res.config.channels?.discord?.allowFrom?.[0]).toBe("12345");
+      expect(typeof res.config.channels?.discord?.allowFrom?.[0]).toBe("string");
+      expect(res.config.channels?.discord?.dm?.allowFrom?.[0]).toBe("456");
+      expect(res.config.channels?.discord?.guilds?.["123"]?.users?.[0]).toBe("111");
+      expect(res.config.channels?.discord?.guilds?.["123"]?.roles?.[0]).toBe("222");
+      expect(res.config.channels?.discord?.execApprovals?.approvers?.[0]).toBe("555");
     }
   });
 });

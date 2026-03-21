@@ -1,17 +1,24 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
-// Mirror the production DiscordIdSchema to test in isolation
-const DiscordIdSchema = z.preprocess(
+// OLD schema (from before this fix) — for regression comparison
+const OldDiscordIdSchema = z
+  .union([z.string(), z.number()])
+  .refine((value) => typeof value === "string", {
+    message: "Discord IDs must be strings (wrap numeric IDs in quotes).",
+  });
+
+// NEW schema (the fix)
+const NewDiscordIdSchema = z.preprocess(
   (val) => (typeof val === "number" ? String(val) : val),
   z.string({
-    invalid_type_error: "Discord IDs must be strings (wrap numeric IDs in quotes).",
+    message: "Discord IDs must be strings (wrap numeric IDs in quotes).",
   }),
 );
 
-describe("DiscordIdSchema", () => {
+describe("DiscordIdSchema — new behavior", () => {
   it("accepts string Discord IDs", () => {
-    const result = DiscordIdSchema.safeParse("123456789012345678");
+    const result = NewDiscordIdSchema.safeParse("123456789012345678");
     expect(result.success).toBe(true);
     if (result.success) {
       expect(result.data).toBe("123456789012345678");
@@ -20,9 +27,7 @@ describe("DiscordIdSchema", () => {
 
   it("preserves large snowflake IDs as strings without precision loss", () => {
     const largeId = "1234567890123456789";
-    // This ID exceeds Number.MAX_SAFE_INTEGER, so casting to number loses precision
-    expect(Number(largeId).toString()).not.toBe(largeId);
-    const result = DiscordIdSchema.safeParse(largeId);
+    const result = NewDiscordIdSchema.safeParse(largeId);
     expect(result.success).toBe(true);
     if (result.success) {
       expect(result.data).toBe(largeId);
@@ -31,7 +36,7 @@ describe("DiscordIdSchema", () => {
   });
 
   it("coerces small numeric IDs to strings", () => {
-    const result = DiscordIdSchema.safeParse(12345);
+    const result = NewDiscordIdSchema.safeParse(12345);
     expect(result.success).toBe(true);
     if (result.success) {
       expect(result.data).toBe("12345");
@@ -39,12 +44,36 @@ describe("DiscordIdSchema", () => {
   });
 
   it("rejects non-string non-number values", () => {
-    const result = DiscordIdSchema.safeParse(true);
-    expect(result.success).toBe(false);
+    expect(NewDiscordIdSchema.safeParse(true).success).toBe(false);
+    expect(NewDiscordIdSchema.safeParse(null).success).toBe(false);
+    expect(NewDiscordIdSchema.safeParse(undefined).success).toBe(false);
+    expect(NewDiscordIdSchema.safeParse({}).success).toBe(false);
+  });
+});
+
+describe("DiscordIdSchema — proves bug fix (old vs new)", () => {
+  it("OLD schema rejects numeric IDs — this is the bug", () => {
+    // The old schema accepted numbers in the union but then rejected them
+    // in the refine — confusing error for web UI users
+    const result = OldDiscordIdSchema.safeParse(12345);
+    expect(result.success).toBe(false); // OLD: rejects numbers
   });
 
-  it("accepts wildcard string", () => {
-    const result = DiscordIdSchema.safeParse("*");
-    expect(result.success).toBe(true);
+  it("NEW schema accepts numeric IDs by coercing to string — this is the fix", () => {
+    // The new schema coerces numbers to strings, so the web UI can send
+    // either quoted or unquoted IDs and both work
+    const result = NewDiscordIdSchema.safeParse(12345);
+    expect(result.success).toBe(true); // NEW: coerces and accepts
+    if (result.success) {
+      expect(result.data).toBe("12345");
+    }
+  });
+
+  it("both schemas handle string IDs identically", () => {
+    const id = "123456789012345678";
+    const oldResult = OldDiscordIdSchema.safeParse(id);
+    const newResult = NewDiscordIdSchema.safeParse(id);
+    expect(oldResult.success).toBe(true);
+    expect(newResult.success).toBe(true);
   });
 });

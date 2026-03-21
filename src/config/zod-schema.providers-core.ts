@@ -47,7 +47,7 @@ const ToolPolicyBySenderSchema = z.record(z.string(), ToolPolicySchema).optional
 const DiscordIdSchema = z.preprocess(
   (val) => (typeof val === "number" ? String(val) : val),
   z.string({
-    invalid_type_error: "Discord IDs must be strings (wrap numeric IDs in quotes).",
+    message: "Discord IDs must be strings (wrap numeric IDs in quotes).",
   }),
 );
 const DiscordIdListSchema = z.array(DiscordIdSchema);
