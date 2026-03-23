@@ -129,25 +129,25 @@ describe("formatUpdateOneLiner", () => {
     });
 
     expect(formatUpdateOneLiner(update)).toBe(
-      `Update: git main · ↔ origin/main · up to date · npm latest ${VERSION} · deps ok`,
+      `Update: git main · ↔ origin/main · up to date · npm ${VERSION} (up to date) · deps ok`,
     );
   });
 
-  it("renders package-manager mode with explicit up-to-date state", () => {
+  it("renders package-manager installs with an explicit up to date registry summary", () => {
     const update = buildUpdate({
       installKind: "package",
-      packageManager: "npm",
+      packageManager: "pnpm",
       registry: { latestVersion: VERSION },
       deps: {
-        manager: "npm",
+        manager: "pnpm",
         status: "ok",
-        lockfilePath: "package-lock.json",
-        markerPath: "node_modules",
+        lockfilePath: "pnpm-lock.yaml",
+        markerPath: "node_modules/.modules.yaml",
       },
     });
 
     expect(formatUpdateOneLiner(update)).toBe(
-      `Update: npm · up to date · npm latest ${VERSION} · deps ok`,
+      `Update: pnpm · npm ${VERSION} (up to date) · deps ok`,
     );
   });
 
